@@ -9,12 +9,17 @@ from dotenv import load_dotenv
 from .models import (
     MonthPlanRequest, MonthPlanResponse, AllocationLine, WeeklyTarget,
     TransactionBatch, HoldingsUpdateRequest, NetWorthSnapshot, MonthCloseRequest,
-    NotionUpsertRequest
+    NotionUpsertRequest, SettingsUpdateRequest, GoalsUpsertRequest, PlanYearUpdateRequest
 )
 from .services import (
     sheets_append_row_by_header,
     sheets_get_all_records,
     notion_upsert_month_page,
+    sheets_append_row_by_header, 
+    sheets_get_all_records, 
+    sheets_update_row_by_header, 
+    sheets_upsert_row_by_key, 
+    notion_upsert_month_page
 )
 
 load_dotenv()
@@ -257,3 +262,126 @@ def upsert_notion_month_page(req: NotionUpsertRequest, _: None = Depends(require
 
     res = notion_upsert_month_page(req.month, parent_id, sheet_url=req.sheet_url)
     return {"month": req.month, **res}
+
+@app.get("/settings")
+def get_settings(_: None = Depends(require_auth)):
+    # Expect settings in row 2 (singleton). If empty, return env defaults.
+    rows = sheets_get_all_records("Settings")
+    if rows and isinstance(rows, list):
+        # get_all_records() returns list of dicts starting from row2
+        # if user has one row, it will be rows[0]
+        if len(rows) >= 1:
+            return rows[0]
+
+    return {
+        "currency": os.getenv("CURRENCY", "INR"),
+        "fiscal_year_start_month": int(os.getenv("FISCAL_YEAR_START_MONTH", "4")),
+        "risk_mode": os.getenv("DEFAULT_MODE", "balanced"),
+        "default_allocations_json": {},
+        "ppf_annual_target": float(os.getenv("PPF_ANNUAL_TARGET", "150000")),
+        "goal_priorities_json": {},
+    }
+
+
+@app.post("/settings")
+def update_settings(req: SettingsUpdateRequest, _: None = Depends(require_auth)):
+    # Merge existing row (if any) with new values, then write to row 2
+    existing = {}
+    rows = sheets_get_all_records("Settings")
+    if rows and len(rows) >= 1:
+        existing = rows[0] or {}
+
+    # Only overwrite fields provided
+    merged = dict(existing)
+    payload = req.model_dump(exclude_none=True)
+
+    merged.update(payload)
+
+    # Ensure required-ish defaults exist if still missing
+    merged.setdefault("currency", os.getenv("CURRENCY", "INR"))
+    merged.setdefault("fiscal_year_start_month", int(os.getenv("FISCAL_YEAR_START_MONTH", "4")))
+    merged.setdefault("risk_mode", os.getenv("DEFAULT_MODE", "balanced"))
+    merged.setdefault("ppf_annual_target", float(os.getenv("PPF_ANNUAL_TARGET", "150000")))
+    merged.setdefault("default_allocations_json", {})
+    merged.setdefault("goal_priorities_json", {})
+
+    sheets_update_row_by_header("Settings", 2, merged)
+    return {"ok": True, "settings": merged}
+
+
+@app.get("/goals")
+def list_goals(_: None = Depends(require_auth)):
+    return {"items": sheets_get_all_records("Goals")}
+
+
+@app.post("/goals/upsert")
+def upsert_goals(req: GoalsUpsertRequest, _: None = Depends(require_auth)):
+    now = utc_now_iso()
+
+    existing_rows = sheets_get_all_records("Goals")
+    existing_created_at = {}
+    for r in existing_rows:
+        name = str(r.get("goal_name", "")).strip()
+        if name:
+            existing_created_at[name] = r.get("created_at", "") or ""
+
+    results = []
+    for g in req.items:
+        created_at = existing_created_at.get(g.goal_name, "") or now
+        monthly_required = g.monthly_required if g.monthly_required is not None else ""
+
+        row_dict = {
+            "goal_name": g.goal_name,
+            "target_amount": g.target_amount,
+            "target_date": g.target_date,
+            "priority": g.priority,
+            "current_saved": g.current_saved,
+            "monthly_required": monthly_required,
+            "status": g.status,
+            "notes": g.notes or "",
+            "created_at": created_at,
+            "updated_at": now,
+        }
+
+        res = sheets_upsert_row_by_key("Goals", "goal_name", g.goal_name, row_dict)
+        results.append({"goal_name": g.goal_name, **res})
+
+    return {"ok": True, "results": results}
+
+
+@app.get("/plan/year")
+def get_plan_year(fy: str, _: None = Depends(require_auth)):
+    rows = sheets_get_all_records("Plan_Year")
+    for r in rows:
+        if str(r.get("fy", "")).strip() == fy.strip():
+            return r
+    return {"fy": fy}
+
+
+@app.post("/plan/year/upsert")
+def upsert_plan_year(req: PlanYearUpdateRequest, _: None = Depends(require_auth)):
+    now = utc_now_iso()
+
+    existing_rows = sheets_get_all_records("Plan_Year")
+    existing_created_at = {}
+    for r in existing_rows:
+        fy = str(r.get("fy", "")).strip()
+        if fy:
+            existing_created_at[fy] = r.get("created_at", "") or ""
+
+    created_at = existing_created_at.get(req.fy, "") or now
+
+    row_dict = {
+        "fy": req.fy,
+        "ppf_target": req.ppf_target if req.ppf_target is not None else "",
+        "ppf_monthly": req.ppf_monthly if req.ppf_monthly is not None else "",
+        "total_invest_target": req.total_invest_target if req.total_invest_target is not None else "",
+        "emergency_target": req.emergency_target if req.emergency_target is not None else "",
+        "big_purchases_json": req.big_purchases_json if req.big_purchases_json is not None else {},
+        "notes": req.notes or "",
+        "created_at": created_at,
+    }
+
+    res = sheets_upsert_row_by_key("Plan_Year", "fy", req.fy, row_dict)
+    return {"ok": True, **res}
+
