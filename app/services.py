@@ -18,6 +18,20 @@ def sheets_append_row(tab_name: str, row: list):
     sh = gc.open_by_key(sheet_id)
     ws = sh.worksheet(tab_name)
     ws.append_row(row, value_input_option="USER_ENTERED")
+    
+def sheets_append_row_by_header(tab_name: str, row_dict: dict):
+    sheet_id = os.environ["SHEET_ID"]
+    gc = _get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    ws = sh.worksheet(tab_name)
+
+    headers = ws.row_values(1)
+    row = []
+    for h in headers:
+        row.append(row_dict.get(h, ""))
+
+    ws.append_row(row, value_input_option="USER_ENTERED")
+
 
 def notion_client():
     token = os.environ.get("NOTION_TOKEN")
