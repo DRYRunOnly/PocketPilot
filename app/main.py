@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 
 from .models import (
@@ -13,27 +14,27 @@ load_dotenv()
 
 app = FastAPI(title="PocketPilot Finance API", version="1.0.0")
 
+# Proper Bearer auth (adds "Authorize" button in /docs and correct OpenAPI security schema)
+bearer = HTTPBearer(auto_error=False)
 
-def auth(authorization: str | None):
+def require_auth(creds: HTTPAuthorizationCredentials = Depends(bearer)):
     """
     Expects: Authorization: Bearer <token>
-    Token value must match env var X_API_KEY
+    Token must match env var X_API_KEY
     """
     expected = os.environ.get("X_API_KEY")
     if not expected:
         raise HTTPException(status_code=500, detail="X_API_KEY not configured")
 
-    if not authorization or not authorization.startswith("Bearer "):
+    if not creds or creds.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
-    token = authorization.removeprefix("Bearer ").strip()
-    if token != expected:
+    if creds.credentials != expected:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
 @app.get("/profile")
-def get_profile(authorization: str | None = Header(default=None)):
-    auth(authorization)
+def get_profile(_: None = Depends(require_auth)):
     return {
         "currency": os.getenv("CURRENCY", "INR"),
         "fiscal_year_start_month": int(os.getenv("FISCAL_YEAR_START_MONTH", "4")),
@@ -43,9 +44,7 @@ def get_profile(authorization: str | None = Header(default=None)):
 
 
 @app.post("/month/plan", response_model=MonthPlanResponse)
-def create_month_plan(req: MonthPlanRequest, authorization: str | None = Header(default=None)):
-    auth(authorization)
-
+def create_month_plan(req: MonthPlanRequest, _: None = Depends(require_auth)):
     income = req.expected_income_base
 
     # Simple balanced allocation (you can refine later)
@@ -108,8 +107,7 @@ def create_month_plan(req: MonthPlanRequest, authorization: str | None = Header(
 
 
 @app.post("/transactions")
-def add_transactions(batch: TransactionBatch, authorization: str | None = Header(default=None)):
-    auth(authorization)
+def add_transactions(batch: TransactionBatch, _: None = Depends(require_auth)):
     for t in batch.items:
         sheets_append_row("Transactions", [
             t.date, t.amount, t.type, t.category, t.account or "", t.notes or "", t.month, ",".join(t.tags)
@@ -118,8 +116,7 @@ def add_transactions(batch: TransactionBatch, authorization: str | None = Header
 
 
 @app.post("/holdings")
-def upsert_holdings(req: HoldingsUpdateRequest, authorization: str | None = Header(default=None)):
-    auth(authorization)
+def upsert_holdings(req: HoldingsUpdateRequest, _: None = Depends(require_auth)):
     for h in req.items:
         sheets_append_row("Holdings", [
             req.as_of, h.asset_type, h.name, h.qty, h.avg_cost, h.current_value, h.account or "", h.notes or ""
@@ -128,8 +125,7 @@ def upsert_holdings(req: HoldingsUpdateRequest, authorization: str | None = Head
 
 
 @app.post("/networth/snapshot")
-def add_networth(req: NetWorthSnapshot, authorization: str | None = Header(default=None)):
-    auth(authorization)
+def add_networth(req: NetWorthSnapshot, _: None = Depends(require_auth)):
     net = (
         (req.cash_bank + req.fd_total + req.ppf_balance + req.equity_value + req.mf_value + req.other_assets)
         - (req.liabilities_cc + req.liabilities_loans)
@@ -142,8 +138,7 @@ def add_networth(req: NetWorthSnapshot, authorization: str | None = Header(defau
 
 
 @app.post("/month/close")
-def close_month(req: MonthCloseRequest, authorization: str | None = Header(default=None)):
-    auth(authorization)
+def close_month(req: MonthCloseRequest, _: None = Depends(require_auth)):
     total = req.win_count + req.loss_count
     win_rate = (req.win_count / total * 100) if total else 0.0
     sheets_append_row("Performance_Monthly", [
@@ -153,9 +148,7 @@ def close_month(req: MonthCloseRequest, authorization: str | None = Header(defau
 
 
 @app.post("/notion/month-page")
-def upsert_notion_month_page(req: NotionUpsertRequest, authorization: str | None = Header(default=None)):
-    auth(authorization)
-
+def upsert_notion_month_page(req: NotionUpsertRequest, _: None = Depends(require_auth)):
     parent_id = req.notion_parent_page_id or os.environ.get("NOTION_PARENT_PAGE_ID")
     if not parent_id:
         raise HTTPException(status_code=500, detail="NOTION_PARENT_PAGE_ID not configured")
@@ -166,4 +159,3 @@ def upsert_notion_month_page(req: NotionUpsertRequest, authorization: str | None
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"month": req.month, **res}
-
