@@ -1,18 +1,21 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
+from typing import List, Optional
+from pydantic import BaseModel
+
 
 class BigExpense(BaseModel):
     name: str
     amount: float
-    due_month: str  # YYYY-MM
-    priority: int = 1
+    due_month: str
+    priority: Optional[int] = 1
+
 
 class MonthPlanRequest(BaseModel):
     month: str  # YYYY-MM
     expected_income_base: float
-    expected_income_upside: float = 0
-    known_big_expenses: List[BigExpense] = Field(default_factory=list)
-    mode: str = "balanced"
+    expected_income_upside: Optional[float] = 0
+    known_big_expenses: List[BigExpense] = []
+    mode: Optional[str] = "balanced"
+
 
 class AllocationLine(BaseModel):
     category: str
@@ -20,10 +23,12 @@ class AllocationLine(BaseModel):
     amount: float
     notes: Optional[str] = None
 
+
 class WeeklyTarget(BaseModel):
     category: str
     weekly_amount: float
     notes: Optional[str] = None
+
 
 class MonthPlanResponse(BaseModel):
     month: str
@@ -33,31 +38,38 @@ class MonthPlanResponse(BaseModel):
     trading_cap_allowed: bool
     trading_cap_amount: float
 
+
 class Transaction(BaseModel):
     date: str
     amount: float
-    type: Literal["income", "expense", "transfer"]
+    type: str  # income/expense/transfer
     category: str
+    subcategory: Optional[str] = None
     account: Optional[str] = None
     notes: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
-    month: str  # YYYY-MM
+    month: str
+    tags: List[str] = []
+
 
 class TransactionBatch(BaseModel):
     items: List[Transaction]
 
+
 class HoldingItem(BaseModel):
-    asset_type: Literal["cash","bank","fd","ppf","stock","mf","other"]
+    asset_type: str  # cash/bank/fd/ppf/stock/mf/other
     name: str
-    qty: float = 0
-    avg_cost: float = 0
+    qty: Optional[float] = None
+    avg_cost: Optional[float] = None
+    current_price: Optional[float] = None
     current_value: float
     account: Optional[str] = None
     notes: Optional[str] = None
 
+
 class HoldingsUpdateRequest(BaseModel):
     as_of: str  # YYYY-MM-DD
     items: List[HoldingItem]
+
 
 class NetWorthSnapshot(BaseModel):
     date: str  # YYYY-MM-DD
@@ -71,13 +83,15 @@ class NetWorthSnapshot(BaseModel):
     liabilities_loans: float = 0
     notes: Optional[str] = None
 
+
 class MonthCloseRequest(BaseModel):
-    month: str
+    month: str  # YYYY-MM
     realized_pnl: float = 0
     unrealized_pnl: float = 0
     win_count: int = 0
     loss_count: int = 0
     notes: Optional[str] = None
+
 
 class NotionUpsertRequest(BaseModel):
     month: str
