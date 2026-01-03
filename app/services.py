@@ -1,49 +1,88 @@
-import os, json
+import os
+import json
+from functools import lru_cache
+from typing import Any, Dict, List, Optional
+
 import gspread
 from google.oauth2.service_account import Credentials
 from notion_client import Client as NotionClient
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+
 def _get_gspread_client():
-    # Store full JSON key in Render env var GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT
+    """
+    Render env var expected:
+      GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT = full JSON string
+    """
     sa_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT"]
     info = json.loads(sa_json)
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
 
-def sheets_append_row(tab_name: str, row: list):
-    sheet_id = os.environ["SHEET_ID"]
-    gc = _get_gspread_client()
-    sh = gc.open_by_key(sheet_id)
-    ws = sh.worksheet(tab_name)
-    ws.append_row(row, value_input_option="USER_ENTERED")
-    
-def sheets_append_row_by_header(tab_name: str, row_dict: dict):
-    sheet_id = os.environ["SHEET_ID"]
-    gc = _get_gspread_client()
-    sh = gc.open_by_key(sheet_id)
-    ws = sh.worksheet(tab_name)
 
+@lru_cache(maxsize=1)
+def _open_sheet():
+    sheet_id = os.environ["SHEET_ID"]
+    gc = _get_gspread_client()
+    return gc.open_by_key(sheet_id)
+
+
+def _worksheet(tab_name: str):
+    sh = _open_sheet()
+    return sh.worksheet(tab_name)
+
+
+@lru_cache(maxsize=64)
+def _sheet_headers(tab_name: str) -> List[str]:
+    ws = _worksheet(tab_name)
     headers = ws.row_values(1)
+    if not headers:
+        raise RuntimeError(f"Sheet '{tab_name}' has no header row in row 1")
+    return headers
+
+
+def sheets_append_row_by_header(tab_name: str, row_dict: Dict[str, Any]):
+    """
+    Appends a row aligned to the header row (Row 1) of the given worksheet.
+    Any missing header keys are written as blank.
+    Any extra keys in row_dict are ignored.
+    """
+    ws = _worksheet(tab_name)
+    headers = _sheet_headers(tab_name)
+
     row = []
     for h in headers:
-        row.append(row_dict.get(h, ""))
+        v = row_dict.get(h, "")
+        # Convert lists/dicts to JSON strings for *_json columns
+        if isinstance(v, (dict, list)):
+            v = json.dumps(v, ensure_ascii=False)
+        row.append(v)
 
     ws.append_row(row, value_input_option="USER_ENTERED")
 
 
-def notion_client():
+def sheets_get_all_records(tab_name: str) -> List[Dict[str, Any]]:
+    """
+    Reads all rows as dicts, using Row 1 as headers.
+    """
+    ws = _worksheet(tab_name)
+    # gspread returns "" for empty cells
+    return ws.get_all_records()
+
+
+def notion_client() -> NotionClient:
     token = os.environ.get("NOTION_TOKEN")
     if not token:
-        return None
+        raise RuntimeError("NOTION_TOKEN not configured")
     return NotionClient(auth=token)
 
-def notion_upsert_month_page(month: str, parent_page_id: str, sheet_url: str | None = None):
-    notion = notion_client()
-    if not notion:
-        raise RuntimeError("NOTION_TOKEN not configured")
 
+def notion_upsert_month_page(month: str, parent_page_id: str, sheet_url: Optional[str] = None):
+    """
+    Creates a month page under parent page. (Simple create for now; no true upsert.)
+    """
+    notion = notion_client()
     title = f"{month} — Plan & Close"
 
     def text(s: str):
