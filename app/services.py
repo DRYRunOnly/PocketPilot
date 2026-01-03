@@ -140,3 +140,66 @@ def notion_upsert_month_page(month: str, parent_page_id: str, sheet_url: Optiona
     )
 
     return {"page_id": page["id"], "page_url": page.get("url")}
+
+from typing import Any, Dict, List, Optional
+
+def _col_to_a1(col_idx_1based: int) -> str:
+    """1-based column index -> Excel column letters (1=A, 27=AA)."""
+    col = col_idx_1based
+    s = ""
+    while col > 0:
+        col, rem = divmod(col - 1, 26)
+        s = chr(65 + rem) + s
+    return s
+
+
+def sheets_update_row_by_header(tab_name: str, row_number_1based: int, row_dict: Dict[str, Any]):
+    """
+    Updates a specific row number (e.g., row 2 for singleton Settings) aligned to headers.
+    Missing keys become blank.
+    """
+    ws = _worksheet(tab_name)
+    headers = _sheet_headers(tab_name)
+
+    row = []
+    for h in headers:
+        v = row_dict.get(h, "")
+        if isinstance(v, (dict, list)):
+            v = json.dumps(v, ensure_ascii=False)
+        row.append(v)
+
+    end_col = _col_to_a1(len(headers))
+    rng = f"A{row_number_1based}:{end_col}{row_number_1based}"
+    ws.update(rng, [row], value_input_option="USER_ENTERED")
+
+
+def sheets_upsert_row_by_key(tab_name: str, key_column: str, key_value: str, row_dict: Dict[str, Any]):
+    """
+    Upsert a row in a tab using a unique key column value.
+    - If key exists: updates that row
+    - Else: appends a new row
+    """
+    ws = _worksheet(tab_name)
+    headers = _sheet_headers(tab_name)
+
+    if key_column not in headers:
+        raise RuntimeError(f"'{key_column}' not found in header row for tab '{tab_name}'")
+
+    key_col_idx = headers.index(key_column) + 1  # 1-based
+    col_vals = ws.col_values(key_col_idx)  # includes header in row 1
+
+    # Find existing row (skip header)
+    target_row = None
+    for i, v in enumerate(col_vals[1:], start=2):  # start at row 2
+        if str(v).strip() == str(key_value).strip():
+            target_row = i
+            break
+
+    if target_row:
+        sheets_update_row_by_header(tab_name, target_row, row_dict)
+        return {"action": "updated", "row": target_row}
+
+    # append if not found
+    sheets_append_row_by_header(tab_name, row_dict)
+    return {"action": "inserted"}
+
