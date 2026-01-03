@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime, timezone, date
-
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
