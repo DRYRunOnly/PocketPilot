@@ -155,5 +155,15 @@ def close_month(req: MonthCloseRequest, authorization: str | None = Header(defau
 @app.post("/notion/month-page")
 def upsert_notion_month_page(req: NotionUpsertRequest, authorization: str | None = Header(default=None)):
     auth(authorization)
-    res = notion_upsert_month_page(req.month, req.notion_parent_page_id)
+
+    parent_id = req.notion_parent_page_id or os.environ.get("NOTION_PARENT_PAGE_ID")
+    if not parent_id:
+        raise HTTPException(status_code=500, detail="NOTION_PARENT_PAGE_ID not configured")
+
+    try:
+        res = notion_upsert_month_page(req.month, parent_id, sheet_url=req.sheet_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     return {"month": req.month, **res}
+
