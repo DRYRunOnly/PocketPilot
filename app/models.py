@@ -1,5 +1,38 @@
-from typing import List, Optional
+from typing import Optional, List, Any, Dict
 from pydantic import BaseModel
+
+class SettingsUpdateRequest(BaseModel):
+    currency: Optional[str] = None
+    fiscal_year_start_month: Optional[int] = None
+    risk_mode: Optional[str] = None  # e.g. balanced
+    default_allocations_json: Optional[Dict[str, Any]] = None
+    ppf_annual_target: Optional[float] = None
+    goal_priorities_json: Optional[Dict[str, Any]] = None
+
+
+class GoalItem(BaseModel):
+    goal_name: str
+    target_amount: float
+    target_date: str  # YYYY-MM or YYYY-MM-DD (you decide)
+    priority: int = 1
+    current_saved: float = 0
+    monthly_required: Optional[float] = None
+    status: str = "active"  # active/paused/done
+    notes: Optional[str] = None
+
+
+class GoalsUpsertRequest(BaseModel):
+    items: List[GoalItem]
+
+
+class PlanYearUpdateRequest(BaseModel):
+    fy: str  # e.g. FY2026 or 2025-26
+    ppf_target: Optional[float] = None
+    ppf_monthly: Optional[float] = None
+    total_invest_target: Optional[float] = None
+    emergency_target: Optional[float] = None
+    big_purchases_json: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
 
 
 class BigExpense(BaseModel):
