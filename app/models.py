@@ -81,5 +81,5 @@ class MonthCloseRequest(BaseModel):
 
 class NotionUpsertRequest(BaseModel):
     month: str
-    notion_parent_page_id: str
+    notion_parent_page_id: Optional[str] = None
     sheet_url: Optional[str] = None
